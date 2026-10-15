@@ -21,13 +21,17 @@ Example of the required ending:
 FORMAT_REMINDER = "\n\nFinish with your [PROP] lines."
 
 
-def system_message(constraints: list[str] | None = None) -> str:
-    msg = SYSTEM
-    if constraints:
-        msg += "\n\nIMPORTANT CONSTRAINTS to follow:"
-        for i, c in enumerate(constraints, 1):
-            msg += f"\n{i}. {c}"
-    return msg
+def system_message() -> str:
+    return SYSTEM
+
+
+def with_constraints(user: str, constraints: list[str] | None) -> str:
+    """ExtractConstraints output is prepended to the next prompt (Section 4.5.3)."""
+    if not constraints:
+        return user
+    head = "IMPORTANT CONSTRAINTS from the verification of your previous answer:\n"
+    head += "".join(f"{i}. {c}\n" for i, c in enumerate(constraints, 1))
+    return head + "\n" + user
 
 
 def cot_wrapper(prompt: str, num_steps: int = 3) -> str:

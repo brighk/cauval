@@ -9,14 +9,21 @@ from .kb import ChainKB, polarity
 from .linker import EntityLinker
 from .props import Proposition
 
-VERIFIED, PARTIAL, CONTRADICTION, FAILED = "VERIFIED", "PARTIAL", "CONTRADICTION", "FAILED"
+VERIFIED, PARTIAL, CONTRADICTION, FAILED = (
+    "VERIFIED",
+    "PARTIAL",
+    "CONTRADICTION",
+    "FAILED",
+)
 
 
 class Verifier:
     def __init__(self, linker: EntityLinker):
         self.linker = linker
 
-    def verify(self, props: list[Proposition], kb: ChainKB, settings: CAFSettings) -> list[dict]:
+    def verify(
+        self, props: list[Proposition], kb: ChainKB, settings: CAFSettings
+    ) -> list[dict]:
         return [self._one(p, kb, settings) for p in props]
 
     def _one(self, p: Proposition, kb: ChainKB, st: CAFSettings) -> dict:
@@ -45,7 +52,10 @@ class Verifier:
             preds = kb.predicates(su, ou) | kb.predicates(ou, su)
             out["kb_relations"] = sorted(preds)
             if preds:
-                out["status"], out["reason"] = CONTRADICTION, "knowledge base links the two"
+                out["status"], out["reason"] = (
+                    CONTRADICTION,
+                    "knowledge base links the two",
+                )
             else:
                 out["reason"] = "no support"
             return out
@@ -55,7 +65,10 @@ class Verifier:
         sign = polarity(p.relation)
         if p.negated:
             if any(polarity(q) == sign for q in preds):
-                out["status"], out["reason"] = CONTRADICTION, "knowledge base asserts the relation"
+                out["status"], out["reason"] = (
+                    CONTRADICTION,
+                    "knowledge base asserts the relation",
+                )
             else:
                 out["reason"] = "negated claim without support"
             return out

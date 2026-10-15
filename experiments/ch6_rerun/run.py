@@ -14,6 +14,7 @@ and skipped. Then: python -m experiments.ch6_rerun.analyze <out dir>
 
 import argparse
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -27,7 +28,7 @@ from .config import SYSTEMS, DatasetSettings, DecodingSettings, EvalSettings
 from .data import build_instances, dataset_fingerprint, load_chains, smoke_subset
 from .kb import build_kb
 from .linker import Encoder, EntityLinker
-from .llm import make_backend
+from .llm import VLLM_ENV, make_backend
 from .systems import Context, run_system
 from .verifier import Verifier
 
@@ -37,14 +38,23 @@ REPO = HERE.parent.parent
 
 def _git(*args) -> str:
     try:
-        return subprocess.run(["git", "-C", str(REPO), *args], capture_output=True, text=True).stdout.strip()
+        return subprocess.run(
+            ["git", "-C", str(REPO), *args], capture_output=True, text=True
+        ).stdout.strip()
     except Exception:
         return ""
 
 
 def _versions() -> dict:
     out = {"python": sys.version.split()[0], "platform": platform.platform()}
-    for mod in ("torch", "transformers", "vllm", "sentence_transformers", "rdflib", "networkx"):
+    for mod in (
+        "torch",
+        "transformers",
+        "vllm",
+        "sentence_transformers",
+        "rdflib",
+        "networkx",
+    ):
         try:
             out[mod] = __import__(mod).__version__
         except Exception:
@@ -75,15 +85,27 @@ def _done_ids(path: Path) -> set[str]:
 
 
 def main(argv=None) -> None:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--smoke", action="store_true", help="3 chains, original + 1 perturbation, seed 1")
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument(
+        "--smoke",
+        action="store_true",
+        help="3 chains, original + 1 perturbation, seed 1",
+    )
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--seeds", type=int, nargs="+", default=[1, 2, 3])
-    ap.add_argument("--systems", nargs="+", default=list(SYSTEMS), choices=list(SYSTEMS))
+    ap.add_argument(
+        "--systems", nargs="+", default=list(SYSTEMS), choices=list(SYSTEMS)
+    )
     ap.add_argument("--backend", choices=["vllm", "hf", "mock"], default="vllm")
     ap.add_argument("--model", default="Qwen/Qwen2.5-7B-Instruct")
-    ap.add_argument("--chains", type=int, default=None, help="use only the first N chains")
-    ap.add_argument("--chunk", type=int, default=150, help="instances per lockstep block")
+    ap.add_argument(
+        "--chains", type=int, default=None, help="use only the first N chains"
+    )
+    ap.add_argument(
+        "--chunk", type=int, default=150, help="instances per lockstep block"
+    )
     ap.add_argument("--gpu-memory-utilization", type=float, default=0.88)
     ap.add_argument("--max-model-len", type=int, default=4096)
     ap.add_argument("--hf-batch-size", type=int, default=8)
@@ -114,7 +136,9 @@ def main(argv=None) -> None:
 
     manifest = {
         "backend": args.backend,
-        "model": args.model if args.backend != "mock" else "MOCK (scripted, not a language model)",
+        "model": args.model
+        if args.backend != "mock"
+        else "MOCK (scripted, not a language model)",
         "dataset": asdict(ds),
         "dataset_fingerprint": dataset_fingerprint(chains, instances),
         "n_chains": len(chains),
@@ -127,34 +151,54 @@ def main(argv=None) -> None:
     mpath = args.out / "manifest.json"
     if mpath.exists():
         old = json.loads(mpath.read_text())
-        for key in ("backend", "model", "dataset_fingerprint", "decoding", "evaluation"):
+        for key in (
+            "backend",
+            "model",
+            "dataset_fingerprint",
+            "decoding",
+            "evaluation",
+        ):
             if old.get(key) != manifest[key]:
-                sys.exit(f"{mpath} was written with a different {key}; use a new --out directory.")
+                sys.exit(
+                    f"{mpath} was written with a different {key}; use a new --out directory."
+                )
         manifest["systems"] = {**old.get("systems", {}), **manifest["systems"]}
         manifest["seeds"] = sorted(set(old.get("seeds", [])) | set(args.seeds))
         manifest["sessions"] = old.get("sessions", [])
     else:
         manifest["seeds"] = sorted(args.seeds)
         manifest["sessions"] = []
-    manifest["sessions"].append({
-        "started": datetime.now().isoformat(timespec="seconds"),
-        "git_commit": _git("rev-parse", "HEAD"),
-        "git_dirty": bool(_git("status", "--porcelain", "--", "experiments/ch6_rerun")),
-        "argv": sys.argv[1:] if argv is None else argv,
-        "versions": _versions(),
-    })
+    manifest["sessions"].append(
+        {
+            "started": datetime.now().isoformat(timespec="seconds"),
+            "git_commit": _git("rev-parse", "HEAD"),
+            "git_dirty": bool(
+                _git("status", "--porcelain", "--", "experiments/ch6_rerun")
+            ),
+            "argv": sys.argv[1:] if argv is None else argv,
+            "versions": _versions(),
+            "env": {k: os.environ.get(k) for k in VLLM_ENV},
+        }
+    )
     mpath.write_text(json.dumps(manifest, indent=2))
 
     print(f"Output: {args.out}")
-    print(f"{len(chains)} chains, {len(instances)} instances, seeds {args.seeds}, "
-          f"systems {', '.join(args.systems)}")
+    print(
+        f"{len(chains)} chains, {len(instances)} instances, seeds {args.seeds}, "
+        f"systems {', '.join(args.systems)}"
+    )
 
     kbs = {c.chain_id: build_kb(c) for c in chains}
     encoder = Encoder(ev.embedding_model, device=args.embed_device)
     verifier = Verifier(EntityLinker(encoder, ev.entity_threshold))
-    backend = make_backend(args.backend, args.model, dec,
-                           gpu_memory_utilization=args.gpu_memory_utilization,
-                           max_model_len=args.max_model_len, batch_size=args.hf_batch_size)
+    backend = make_backend(
+        args.backend,
+        args.model,
+        dec,
+        gpu_memory_utilization=args.gpu_memory_utilization,
+        max_model_len=args.max_model_len,
+        batch_size=args.hf_batch_size,
+    )
     ctx = Context(kbs, verifier, encoder, backend, ev)
 
     timings = {}
@@ -169,9 +213,13 @@ def main(argv=None) -> None:
             if not todo:
                 print(f"[seed {seed}] {name}: complete ({len(done)})")
                 continue
-            print(f"[seed {seed}] {name}: {len(todo)} to run ({len(done)} done)", flush=True)
+            print(
+                f"[seed {seed}] {name}: {len(todo)} to run ({len(done)} done)",
+                flush=True,
+            )
             t0 = time.time()
             with path.open("a") as f:
+
                 def write(rec, f=f):
                     f.write(json.dumps(rec) + "\n")
                     f.flush()
@@ -179,7 +227,10 @@ def main(argv=None) -> None:
                 for start in range(0, len(todo), args.chunk):
                     run_system(spec, todo[start : start + args.chunk], ctx, seed, write)
             timings[f"seed_{seed}/{name}"] = round(time.time() - t0, 1)
-            print(f"[seed {seed}] {name}: done in {timings[f'seed_{seed}/{name}']:.0f}s", flush=True)
+            print(
+                f"[seed {seed}] {name}: done in {timings[f'seed_{seed}/{name}']:.0f}s",
+                flush=True,
+            )
 
     manifest = json.loads(mpath.read_text())
     manifest["sessions"][-1]["finished"] = datetime.now().isoformat(timespec="seconds")
@@ -193,12 +244,18 @@ def main(argv=None) -> None:
 def smoke_report(out: Path, seed: int, systems: list[str]) -> None:
     """Checks that the pipeline produced parseable, linkable output for every system."""
     print("\n=== Smoke test report ===")
-    print(f"{'system':26s} {'inst':>4s} {'parsed':>7s} {'linked':>7s} {'ent.acc':>7s} "
-          f"{'iters':>5s}  statuses / decisions")
+    print(
+        f"{'system':26s} {'inst':>4s} {'parsed':>7s} {'linked':>7s} {'ent.acc':>7s} "
+        f"{'iters':>5s}  statuses / decisions"
+    )
     problems = []
     for name in systems:
-        recs = [json.loads(line) for line in (out / f"seed_{seed}" / f"{name}.jsonl").open()]
-        samples = [s for r in recs for log in r["iterations"] for s in log["sample_props"]]
+        recs = [
+            json.loads(line) for line in (out / f"seed_{seed}" / f"{name}.jsonl").open()
+        ]
+        samples = [
+            s for r in recs for log in r["iterations"] for s in log["sample_props"]
+        ]
         parsed = sum(1 for s in samples if s) / max(len(samples), 1)
         res = [x for r in recs for x in r["final"]["eval_results"]]
         linked = sum(1 for x in res if x["s_link"] and x["o_link"]) / max(len(res), 1)
@@ -206,20 +263,36 @@ def smoke_report(out: Path, seed: int, systems: list[str]) -> None:
         iters = sum(r["final"]["n_iterations"] for r in recs) / max(len(recs), 1)
         st = Counter(x["status"] for x in res)
         dec = Counter(r["final"]["decision"] for r in recs if r["final"]["decision"])
-        print(f"{name:26s} {len(recs):4d} {parsed:7.0%} {linked:7.0%} {acc:7.3f} {iters:5.1f}  "
-              f"{dict(st)} {dict(dec) if dec else ''}")
+        print(
+            f"{name:26s} {len(recs):4d} {parsed:7.0%} {linked:7.0%} {acc:7.3f} {iters:5.1f}  "
+            f"{dict(st)} {dict(dec) if dec else ''}"
+        )
         if parsed < 0.8:
-            problems.append(f"{name}: only {parsed:.0%} of samples yielded a proposition")
+            problems.append(
+                f"{name}: only {parsed:.0%} of samples yielded a proposition"
+            )
         if res and linked < 0.6:
-            problems.append(f"{name}: only {linked:.0%} of final propositions linked to the KB")
-    ex = [json.loads(line) for line in (out / f"seed_{seed}" / "caf.jsonl").open()] if "caf" in systems else []
+            problems.append(
+                f"{name}: only {linked:.0%} of final propositions linked to the KB"
+            )
+    ex = (
+        [json.loads(line) for line in (out / f"seed_{seed}" / "caf.jsonl").open()]
+        if "caf" in systems
+        else []
+    )
     if ex:
         r = ex[0]
-        print(f"\nExample (caf, {r['instance_id']}):\n--- prompt ---\n{r['prompt']}\n--- final answer ---\n"
-              f"{r['final']['text'][:1500]}\n--- verification ---")
+        print(
+            f"\nExample (caf, {r['instance_id']}):\n--- prompt ---\n{r['prompt']}\n--- final answer ---\n"
+            f"{r['final']['text'][:1500]}\n--- verification ---"
+        )
         for x in r["final"]["eval_results"]:
             print(f"  {x['status']:13s} {x['prop']}  ({x['reason']})")
-    print("\nPROBLEMS:\n  " + "\n  ".join(problems) if problems else "\nNo problems detected.")
+    print(
+        "\nPROBLEMS:\n  " + "\n  ".join(problems)
+        if problems
+        else "\nNo problems detected."
+    )
     print(f"Logs: {out}")
 
 

@@ -62,7 +62,14 @@ def seed_metrics(rs: list[dict]) -> dict:
     pert = [r for r in rs if r["variant"] != "original"]
     if not pert:
         return {}
-    f = lambda key, sub=pert: 100 * float(np.mean([r["final"][key] for r in sub])) if sub else float("nan")
+
+    def f(key, sub=pert):
+        return (
+            100 * float(np.mean([r["final"][key] for r in sub]))
+            if sub
+            else float("nan")
+        )
+
     inj = [r for r in pert if r["has_injected_contradiction"]]
     clean = [r for r in pert if not r["has_injected_contradiction"]]
     m = {
@@ -76,12 +83,22 @@ def seed_metrics(rs: list[dict]) -> dict:
         "n_iterations": float(np.mean([r["final"]["n_iterations"] for r in pert])),
         "n": len(pert),
     }
-    orig = {r["chain_id"]: r["final"]["eval_score"] for r in rs if r["variant"] == "original"}
+    orig = {
+        r["chain_id"]: r["final"]["eval_score"]
+        for r in rs
+        if r["variant"] == "original"
+    }
     per_chain = defaultdict(list)
     for r in pert:
         if r["chain_id"] in orig:
-            per_chain[r["chain_id"]].append(1 - abs(orig[r["chain_id"]] - r["final"]["eval_score"]))
-    m["si"] = 100 * float(np.mean([np.mean(v) for v in per_chain.values()])) if per_chain else float("nan")
+            per_chain[r["chain_id"]].append(
+                1 - abs(orig[r["chain_id"]] - r["final"]["eval_score"])
+            )
+    m["si"] = (
+        100 * float(np.mean([np.mean(v) for v in per_chain.values()]))
+        if per_chain
+        else float("nan")
+    )
     for d in DOMAINS:
         sub = [r for r in pert if r["domain"] == d]
         m[f"dom_{d}"] = f("entailment", sub)
@@ -112,9 +129,16 @@ def paired(recs, a, b, seeds, rng) -> dict:
     for s in seeds:
         xa, xb = per_chain_entailment(recs, a, [s]), per_chain_entailment(recs, b, [s])
         cs = set(xa) & set(xb)
-        per_seed.append(100 * float(np.mean([xa[c] - xb[c] for c in cs])) if cs else float("nan"))
-    return {"diff": float(d.mean()), "ci": [float(np.percentile(boots, 2.5)), float(np.percentile(boots, 97.5))],
-            "p": p, "n_chains": len(d), "per_seed": per_seed}
+        per_seed.append(
+            100 * float(np.mean([xa[c] - xb[c] for c in cs])) if cs else float("nan")
+        )
+    return {
+        "diff": float(d.mean()),
+        "ci": [float(np.percentile(boots, 2.5)), float(np.percentile(boots, 97.5))],
+        "p": p,
+        "n_chains": len(d),
+        "per_seed": per_seed,
+    }
 
 
 def holm(ps: dict[str, float]) -> dict[str, float]:
@@ -138,67 +162,126 @@ def fmt(vals: list[float], digits=1) -> str:
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("out", type=Path)
-    ap.add_argument("--allow-mock", action="store_true", help="for testing the analysis code only")
+    ap.add_argument(
+        "--allow-mock", action="store_true", help="for testing the analysis code only"
+    )
     args = ap.parse_args(argv)
 
     manifest, recs = load(args.out)
     if manifest.get("backend") == "mock" and not args.allow_mock:
-        sys.exit("These results come from the scripted mock backend, not a language model. Refusing.")
+        sys.exit(
+            "These results come from the scripted mock backend, not a language model. Refusing."
+        )
     seeds = sorted({s for s, _ in recs})
     systems = [s for s in SYSTEMS if any((sd, s) in recs for sd in seeds)]
     n_exp = manifest["n_instances"]
-    warnings = [f"seed {s} / {name}: {len(recs.get((s, name), []))} of {n_exp} instances"
-                for s in seeds for name in systems if len(recs.get((s, name), [])) != n_exp]
+    warnings = [
+        f"seed {s} / {name}: {len(recs.get((s, name), []))} of {n_exp} instances"
+        for s in seeds
+        for name in systems
+        if len(recs.get((s, name), [])) != n_exp
+    ]
 
-    per = {(s, name): seed_metrics(recs[(s, name)]) for s in seeds for name in systems if (s, name) in recs}
+    per = {
+        (s, name): seed_metrics(recs[(s, name)])
+        for s in seeds
+        for name in systems
+        if (s, name) in recs
+    }
     rng = np.random.default_rng(0)
     comps = {}
     for fam in (BASELINES, ABLATIONS):
-        fam_res = {b: paired(recs, "caf", b, seeds, rng) for b in fam if b in systems and "caf" in systems}
+        fam_res = {
+            b: paired(recs, "caf", b, seeds, rng)
+            for b in fam
+            if b in systems and "caf" in systems
+        }
         adj = holm({b: r["p"] for b, r in fam_res.items() if r})
         for b, r in fam_res.items():
             if r:
                 r["p_holm"] = adj.get(b, float("nan"))
         comps.update(fam_res)
 
-    lines = [f"# Chapter 6 re-run: {args.out.name}", "",
-             f"Model: {manifest['model']} ({manifest['backend']}). Seeds: {seeds}. "
-             f"Chains: {manifest['n_chains']}. Instances per system and seed: {n_exp} "
-             f"(metrics on the perturbed prompts). Values are mean ± SD over seeds.", ""]
+    lines = [
+        f"# Chapter 6 re-run: {args.out.name}",
+        "",
+        f"Model: {manifest['model']} ({manifest['backend']}). Seeds: {seeds}. "
+        f"Chains: {manifest['n_chains']}. Instances per system and seed: {n_exp} "
+        f"(metrics on the perturbed prompts). Values are mean ± SD over seeds.",
+        "",
+    ]
     if manifest.get("smoke"):
         lines += ["**Smoke test only: not for reporting.**", ""]
     if warnings:
         lines += ["**Incomplete:**", *[f"- {w}" for w in warnings], ""]
 
     def table(names, metric_keys, title):
-        lines.extend([f"## {title}", "", "| System | " + " | ".join(lbl for _, lbl in metric_keys) + " |",
-                      "|---|" + "---|" * len(metric_keys)])
+        lines.extend(
+            [
+                f"## {title}",
+                "",
+                "| System | " + " | ".join(lbl for _, lbl in metric_keys) + " |",
+                "|---|" + "---|" * len(metric_keys),
+            ]
+        )
         for name in names:
             if name not in systems:
                 continue
-            cells = [fmt([per[(s, name)].get(k, float("nan")) for s in seeds if (s, name) in per],
-                         2 if k == "n_iterations" else 1) for k, _ in metric_keys]
+            cells = [
+                fmt(
+                    [
+                        per[(s, name)].get(k, float("nan"))
+                        for s in seeds
+                        if (s, name) in per
+                    ],
+                    2 if k == "n_iterations" else 1,
+                )
+                for k, _ in metric_keys
+            ]
             lines.append(f"| {SYSTEMS[name].label} | " + " | ".join(cells) + " |")
         lines.append("")
 
     table(["caf"] + BASELINES, METRICS[:8], "Primary results (Table 6.1)")
-    table(["caf"] + BASELINES, [(f"dom_{d}", d.capitalize()) for d in DOMAINS], "Per-domain entailment accuracy (Table 6.2)")
-    table(["caf"] + ABLATIONS, [METRICS[0], METRICS[7], METRICS[1], METRICS[6], METRICS[8]], "Ablation (Table 6.4)")
+    table(
+        ["caf"] + BASELINES,
+        [(f"dom_{d}", d.capitalize()) for d in DOMAINS],
+        "Per-domain entailment accuracy (Table 6.2)",
+    )
+    table(
+        ["caf"] + ABLATIONS,
+        [METRICS[0], METRICS[7], METRICS[1], METRICS[6], METRICS[8]],
+        "Ablation (Table 6.4)",
+    )
 
-    lines += ["## Full CAF minus each system, entailment accuracy (percentage points)", "",
-              "| Compared with | Difference | 95% CI | Wilcoxon p | Holm p | Per seed |", "|---|---|---|---|---|---|"]
+    lines += [
+        "## Full CAF minus each system, entailment accuracy (percentage points)",
+        "",
+        "| Compared with | Difference | 95% CI | Wilcoxon p | Holm p | Per seed |",
+        "|---|---|---|---|---|---|",
+    ]
     for name in BASELINES + ABLATIONS:
         r = comps.get(name)
         if r:
-            lines.append(f"| {SYSTEMS[name].label} | {r['diff']:+.1f} | [{r['ci'][0]:+.1f}, {r['ci'][1]:+.1f}] | "
-                         f"{r['p']:.3g} | {r.get('p_holm', float('nan')):.3g} | "
-                         + ", ".join(f"{x:+.1f}" for x in r["per_seed"]) + " |")
+            lines.append(
+                f"| {SYSTEMS[name].label} | {r['diff']:+.1f} | [{r['ci'][0]:+.1f}, {r['ci'][1]:+.1f}] | "
+                f"{r['p']:.3g} | {r.get('p_holm', float('nan')):.3g} | "
+                + ", ".join(f"{x:+.1f}" for x in r["per_seed"])
+                + " |"
+            )
     lines.append("")
 
     (args.out / "summary.md").write_text("\n".join(lines))
-    (args.out / "summary.json").write_text(json.dumps(
-        {"seeds": seeds, "per_seed": {f"{s}/{n}": m for (s, n), m in per.items()},
-         "comparisons": comps, "warnings": warnings}, indent=2))
+    (args.out / "summary.json").write_text(
+        json.dumps(
+            {
+                "seeds": seeds,
+                "per_seed": {f"{s}/{n}": m for (s, n), m in per.items()},
+                "comparisons": comps,
+                "warnings": warnings,
+            },
+            indent=2,
+        )
+    )
     (args.out / "tables.tex").write_text(latex(per, comps, seeds, systems))
     print("\n".join(lines))
     print(f"Wrote summary.md, summary.json, tables.tex to {args.out}")
@@ -206,7 +289,9 @@ def main(argv=None) -> None:
 
 def latex(per, comps, seeds, systems) -> str:
     def cell(name, k):
-        vals = [per[(s, name)][k] for s in seeds if (s, name) in per and k in per[(s, name)]]
+        vals = [
+            per[(s, name)][k] for s in seeds if (s, name) in per and k in per[(s, name)]
+        ]
         vals = [v for v in vals if not np.isnan(v)]
         if not vals:
             return "--"
@@ -214,25 +299,42 @@ def latex(per, comps, seeds, systems) -> str:
             return f"{vals[0]:.1f}"
         return f"{np.mean(vals):.1f} $\\pm$ {np.std(vals, ddof=1):.1f}"
 
-    out = ["% Generated by experiments/ch6_rerun/analyze.py", "",
-           "\\begin{tabular}{lccc}", "\\toprule",
-           "System & Entailment Acc. (\\%) & Contradiction Det. (\\%) & Semantic Inv. (\\%) \\\\", "\\midrule"]
+    out = [
+        "% Generated by experiments/ch6_rerun/analyze.py",
+        "",
+        "\\begin{tabular}{lccc}",
+        "\\toprule",
+        "System & Entailment Acc. (\\%) & Contradiction Det. (\\%) & Semantic Inv. (\\%) \\\\",
+        "\\midrule",
+    ]
     for name in ["caf"] + BASELINES:
         if name in systems:
-            out.append(f"{SYSTEMS[name].label} & {cell(name, 'entailment')} & "
-                       f"{cell(name, 'contradiction_flagged')} & {cell(name, 'si')} \\\\")
-    out += ["\\bottomrule", "\\end{tabular}", "",
-            "\\begin{tabular}{lcccc}", "\\toprule",
-            "Configuration & Entailment Acc. (\\%) & $\\Delta$ vs Full CAF & 95\\% CI & Semantic Inv. (\\%) \\\\",
-            "\\midrule"]
+            out.append(
+                f"{SYSTEMS[name].label} & {cell(name, 'entailment')} & "
+                f"{cell(name, 'contradiction_flagged')} & {cell(name, 'si')} \\\\"
+            )
+    out += [
+        "\\bottomrule",
+        "\\end{tabular}",
+        "",
+        "\\begin{tabular}{lcccc}",
+        "\\toprule",
+        "Configuration & Entailment Acc. (\\%) & $\\Delta$ vs Full CAF & 95\\% CI & Semantic Inv. (\\%) \\\\",
+        "\\midrule",
+    ]
     for name in ["caf"] + ABLATIONS:
         if name not in systems:
             continue
         r = comps.get(name)
-        z = lambda x: round(-x, 1) + 0.0  # avoid "-0.0"
+
+        def z(x):
+            return round(-x, 1) + 0.0  # avoid "-0.0"
+
         delta = f"{z(r['diff']):+.1f}" if r else "--"
         ci = f"[{z(r['ci'][1]):+.1f}, {z(r['ci'][0]):+.1f}]" if r else "--"
-        out.append(f"{SYSTEMS[name].label} & {cell(name, 'entailment')} & {delta} & {ci} & {cell(name, 'si')} \\\\")
+        out.append(
+            f"{SYSTEMS[name].label} & {cell(name, 'entailment')} & {delta} & {ci} & {cell(name, 'si')} \\\\"
+        )
     out += ["\\bottomrule", "\\end{tabular}", ""]
     return "\n".join(out)
 

@@ -44,8 +44,14 @@ def entailment(results: list[dict]) -> float:
 def proposition_graph(results: list[dict]) -> nx.DiGraph:
     g = nx.DiGraph()
     for r in results:
-        if r["status"] in (VERIFIED, PARTIAL) and not r["negated"] and r["relation"] != "independent_of":
-            g.add_edge(r["s_link"]["uri"], r["o_link"]["uri"], sign=polarity(r["relation"]))
+        if (
+            r["status"] in (VERIFIED, PARTIAL)
+            and not r["negated"]
+            and r["relation"] != "independent_of"
+        ):
+            g.add_edge(
+                r["s_link"]["uri"], r["o_link"]["uri"], sign=polarity(r["relation"])
+            )
     return g
 
 
@@ -81,7 +87,9 @@ def structural_violations(results: list[dict]) -> list[dict]:
             nx.is_directed_acyclic_graph(nx.restricted_view(g, [], [(u, v)]))
             for u, v in zip(cycle, cycle[1:] + cycle[:1])
         )
-        out.append({"kind": "cycle", "nodes": cycle, "hard": not removable, "prop": None})
+        out.append(
+            {"kind": "cycle", "nodes": cycle, "hard": not removable, "prop": None}
+        )
     for r in results:
         if r["status"] != FAILED or not r["s_link"] or not r["o_link"]:
             continue
@@ -91,27 +99,49 @@ def structural_violations(results: list[dict]) -> list[dict]:
         if r["negated"]:
             eff = simulated_effect(g, s, o)
             if eff != 0 and (eff > 0) == (polarity(r["relation"]) > 0):
-                out.append({"kind": "intervention", "prop": r["prop"], "hard": False,
-                            "detail": "the supported claims imply this effect"})
+                out.append(
+                    {
+                        "kind": "intervention",
+                        "prop": r["prop"],
+                        "hard": False,
+                        "detail": "the supported claims imply this effect",
+                    }
+                )
         elif s in g and o in g and nx.has_path(g, o, s):
-            out.append({"kind": "direction", "prop": r["prop"], "hard": False,
-                        "detail": "runs against the direction of the supported claims"})
+            out.append(
+                {
+                    "kind": "direction",
+                    "prop": r["prop"],
+                    "hard": False,
+                    "detail": "runs against the direction of the supported claims",
+                }
+            )
         else:
             eff = simulated_effect(g, s, o)
             if eff != 0 and (eff > 0) != (polarity(r["relation"]) > 0):
-                out.append({"kind": "intervention", "prop": r["prop"], "hard": False,
-                            "detail": "simulated intervention gives the opposite effect"})
+                out.append(
+                    {
+                        "kind": "intervention",
+                        "prop": r["prop"],
+                        "hard": False,
+                        "detail": "simulated intervention gives the opposite effect",
+                    }
+                )
     return out
 
 
 def _kb_statement(r: dict) -> str | None:
-    rels = [q for q in r["kb_relations"] if q not in ("leads_to", "prevents")] or r["kb_relations"]
+    rels = [q for q in r["kb_relations"] if q not in ("leads_to", "prevents")] or r[
+        "kb_relations"
+    ]
     if not rels or not r["s_link"] or not r["o_link"]:
         return None
     return f"{r['s_link']['label']} {PHRASE[rels[0]]} {r['o_link']['label']}"
 
 
-def constraints_for(results: list[dict], violations: list[dict], samples_had_props: bool = False) -> list[str]:
+def constraints_for(
+    results: list[dict], violations: list[dict], samples_had_props: bool = False
+) -> list[str]:
     """ExtractConstraints (Section 4.5.3). Priority: structural > contradiction > partial."""
     out: list[str] = []
     done: set[str] = set()
@@ -137,25 +167,47 @@ def constraints_for(results: list[dict], violations: list[dict], samples_had_pro
             )
             done.add(r["prop"])
     if not results and samples_had_props:
-        out.append("State only the causal claims the premises support; "
-                   "the sampled answers did not agree on any claim.")
+        out.append(
+            "State only the causal claims the premises support; "
+            "the sampled answers did not agree on any claim."
+        )
     elif not results:
-        out.append("End the answer with your causal claims as [PROP] cause | relation | effect lines.")
+        out.append(
+            "End the answer with your causal claims as [PROP] cause | relation | effect lines."
+        )
     return out
 
 
-def adjudicate(results: list[dict], violations: list[dict], t: int, st: CAFSettings,
-               samples_had_props: bool = False) -> dict:
+def adjudicate(
+    results: list[dict],
+    violations: list[dict],
+    t: int,
+    st: CAFSettings,
+    samples_had_props: bool = False,
+) -> dict:
     """Algorithm 4.2. t is the 0-based iteration index."""
     score = caf_score(results, st)
     if results and score >= st.theta and not violations:
         return {"decision": ACCEPT, "score": score, "constraints": []}
     failed = sum(r["status"] == FAILED for r in results)
     if results and failed / len(results) > st.phi_fail:
-        return {"decision": REJECT, "score": score, "constraints": [], "why": "failed fraction"}
+        return {
+            "decision": REJECT,
+            "score": score,
+            "constraints": [],
+            "why": "failed fraction",
+        }
     if any(v["hard"] for v in violations):
-        return {"decision": REJECT, "score": score, "constraints": [], "why": "hard violation"}
+        return {
+            "decision": REJECT,
+            "score": score,
+            "constraints": [],
+            "why": "hard violation",
+        }
     if t + 1 >= st.iterations:
         return {"decision": TIMEOUT, "score": score, "constraints": []}
-    return {"decision": REFINE, "score": score,
-            "constraints": constraints_for(results, violations, samples_had_props)}
+    return {
+        "decision": REFINE,
+        "score": score,
+        "constraints": constraints_for(results, violations, samples_had_props),
+    }

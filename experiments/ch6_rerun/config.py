@@ -19,7 +19,9 @@ class CAFSettings:
     max_iterations: int = 5  # T_max
     phi_fail: float = 0.7  # Failed fraction above which the DE rejects (Sec. 4.5.3)
     num_samples: int = 5  # K, self-consistency samples per generation
-    consistency_threshold: float = 0.6  # keep a proposition seen in >= this share of samples
+    consistency_threshold: float = (
+        0.6  # keep a proposition seen in >= this share of samples
+    )
     # Component switches used by the ablation study (Table 6.4)
     entity_linking: bool = True  # Sentence-BERT linking; off = exact label match only
     partial_matching: bool = True  # related-predicate (Partial) outcome
@@ -37,7 +39,9 @@ class SystemSpec:
     label: str
     kind: str  # "single" (one generation, scored) or "caf" (verification loop)
     prompt_style: str = "plain"  # plain | cot | rag | rag_cot
-    num_samples: int = 1  # for "single": >1 means self-consistency voting, no verification
+    num_samples: int = (
+        1  # for "single": >1 means self-consistency voting, no verification
+    )
     caf: CAFSettings | None = None
 
     def to_dict(self) -> dict:

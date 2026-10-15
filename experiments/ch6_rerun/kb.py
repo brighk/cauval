@@ -24,7 +24,15 @@ from experiments.synthetic_dataset import CausalChain
 EX = Namespace("http://caf.local/entity/")
 CAF = Namespace("http://caf.local/relation/")
 
-RELATIONS = ["causes", "leads_to", "enables", "implies", "requires", "influences", "prevents"]
+RELATIONS = [
+    "causes",
+    "leads_to",
+    "enables",
+    "implies",
+    "requires",
+    "influences",
+    "prevents",
+]
 NEGATIVE = {"prevents"}
 
 PHRASE = {
@@ -49,10 +57,25 @@ def slug(text: str) -> str:
 def norm_text(text: str) -> str:
     """Normalisation used for exact label matching and proposition keys."""
     t = text.lower().strip()
-    t = re.sub(r"[*_`\"'“”‘’]", " ", t)
-    t = re.sub(r"^(given|therefore|thus|hence|so|then|finally|ultimately)[:,]?\s+", "", t)
+    t = re.sub(r"[*_`\"'“”‘’>#]", " ", t)
+    t = re.sub(
+        r"^(given|therefore|thus|hence|so|then|finally|ultimately)[:,]?\s+", "", t
+    )
     t = re.sub(r"^(the|a|an)\s+", "", t)
-    t = re.sub(r"[\s]+", " ", t)
+    t = re.sub(r"[\s]+", " ", t).strip(" .,;:!?()[]")
+    # "it is not the case that X does not occur" (the double-negation perturbation) is X
+    t = re.sub(
+        r"^it is not the case that (.+?) (?:does not|doesn't|did not|will not) (?:occur|happen|hold)$",
+        r"\1",
+        t,
+    )
+    t = re.sub(r"^(.+?) does not not (?:occur|happen|hold)$", r"\1", t)
+    t = re.sub(
+        r"^it is (?:the case|true) that (.+?)(?: does (?:occur|happen|hold))?$",
+        r"\1",
+        t,
+    )
+    t = re.sub(r"^(.+?) does (?:occur|happen)$", r"\1", t)
     return t.strip(" .,;:!?()[]")
 
 
@@ -71,7 +94,9 @@ class ChainKB:
             "SELECT DISTINCT ?p WHERE { ?s ?p ?o . "
             f'FILTER(STRSTARTS(STR(?p), "{CAF}")) }}'
         )
-        rows = self.graph.query(q, initBindings={"s": URIRef(s_uri), "o": URIRef(o_uri)})
+        rows = self.graph.query(
+            q, initBindings={"s": URIRef(s_uri), "o": URIRef(o_uri)}
+        )
         return {str(r.p)[len(str(CAF)) :] for r in rows}
 
     def ask(self, s_uri: str, relation: str, o_uri: str) -> bool:

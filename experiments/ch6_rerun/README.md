@@ -41,23 +41,28 @@ Seeds 1, 2 and 3 give three repeated runs of every system.
 - **Injected contradictions.** Each injected contradiction is shown to the model as an extra premise. Without that, the "chains with injected contradictions" would never present one.
 - **One evaluator.** Every system's final propositions are re-scored by the same evaluator, with full linking and partial matching. An ablation therefore changes the system, never the yardstick.
 - **Common random numbers.** A request's seed depends on run seed, instance and iteration, not on the system. Full CAF and its ablations start from the same first draft, so paired differences come from the switched-off component.
+- **Batch-invariant decoding.** `llm.py` sets `VLLM_BATCH_INVARIANT=1`. Without it, the same prompt and seed could give different text depending on the rest of the batch. In a 40-instance pilot that changed 7 instances between two identical runs; with it, none changed. It costs about 2.5 times the generation time.
+- **Constraints.** CAF's refinement constraints are prepended to the next user prompt, as Section 4.5.3 states. In the system message, Qwen2.5-7B ignored them.
+- **Conservative linking.** Sentence-BERT scores opposite events as near-identical: "demand decreases" against "demand increases" is 0.88, and "P and Q hold" against "P or Q holds" is 0.93. An embedding link is therefore accepted only if the mention and the label agree in negation (by parity, so "not-Q is false" means Q), direction of change, propositional variables, connectives and relation words. Otherwise the mention stays unlinked, which Section 4.3.2 calls "treated as unknown". The double-negation perturbation ("it is not the case that X does not occur") is normalised to X before linking.
+
+## Model
+
+Use **Qwen2.5-7B-Instruct**, the model Chapter 6 names. In a 10-chain pilot, Qwen3-14B-AWQ was at the ceiling. Its vanilla accuracy was 95%, CAF matched it, and it never repeated an injected contradiction, so neither the baselines nor the ablations could be told apart. Qwen2.5-7B left room: vanilla was 80% and CAF 88% in the same pilot.
 
 ## On the RTX 3090 PC
 
-Use Linux or WSL2 with Python 3.10–3.12.
+The repository is `~/causal-reasoning` and the environment is `/projects/ai-venv`, which has everything needed. It was tested with vLLM 0.21.0 and torch 2.11. A fresh environment can use `requirements.txt` instead.
 
 ```bash
-git clone https://github.com/brighk/causal-autonomy.git
-cd causal-autonomy && git switch ch6-rerun
-python3 -m venv .venv-ch6 && . .venv-ch6/bin/activate
-pip install -r experiments/ch6_rerun/requirements.txt
-pytest tests/unit/test_ch6_rerun.py -q                    # 12 tests, under a minute
+cd ~/causal-reasoning && git status          # commit first: the manifest records the commit
+PY=/projects/ai-venv/bin/python
+$PY -m pytest tests/unit/test_ch6_rerun.py -q   # 21 tests, under a minute
 ```
 
-**1. Smoke test.** It uses 3 chains, the original prompt plus one perturbation, seed 1 and every system. Expect roughly 10–20 minutes, including the model download.
+**1. Smoke test.** It uses 3 chains, the original prompt plus one perturbation, seed 1 and every system. It takes about 3 minutes.
 
 ```bash
-python -m experiments.ch6_rerun.run --smoke
+$PY -m experiments.ch6_rerun.run --smoke
 ```
 
 It ends with a report table and one worked example. Check these before the full run:
@@ -68,11 +73,11 @@ It ends with a report table and one worked example. Check these before the full 
 
 The report lists anything that falls short under PROBLEMS.
 
-**2. Full run.** It uses 3 seeds and all 11 systems. Estimated time with vLLM is 3–6 hours. Run it in `tmux` so it survives a closed terminal.
+**2. Full run.** It uses 3 seeds, all 11 systems and 300 prompts per system and seed. Expect about 45 minutes per seed, so 2 to 3 hours in total. Run it in `tmux` so it survives a closed terminal.
 
 ```bash
 tmux new -s ch6
-python -m experiments.ch6_rerun.run --out experiments/ch6_rerun/results/full
+$PY -m experiments.ch6_rerun.run --out experiments/ch6_rerun/results/full
 ```
 
 If it stops, run the same command again. Finished instances are skipped. To run seeds one at a time, add `--seeds 1`, then `--seeds 2`, then `--seeds 3`, keeping the same `--out`.
@@ -80,7 +85,7 @@ If it stops, run the same command again. Finished instances are skipped. To run 
 **3. Analysis.**
 
 ```bash
-python -m experiments.ch6_rerun.analyze experiments/ch6_rerun/results/full
+$PY -m experiments.ch6_rerun.analyze experiments/ch6_rerun/results/full
 ```
 
 This writes `summary.md`, `summary.json` and `tables.tex` next to the results. The output contains:

@@ -52,7 +52,9 @@ def _insert_premise(prompt: str, premise: str, chain_id: str) -> str:
     return "\n".join(lines[:pos] + [f"- {premise}"] + lines[pos:])
 
 
-def build_instances(chains: list[CausalChain], settings: DatasetSettings) -> list[Instance]:
+def build_instances(
+    chains: list[CausalChain], settings: DatasetSettings
+) -> list[Instance]:
     out = []
     for c in chains:
         contra = c.injected_contradictions[0] if c.injected_contradictions else None
@@ -106,7 +108,10 @@ def dataset_fingerprint(chains: list[CausalChain], instances: list[Instance]) ->
     payload = json.dumps(
         {
             "chains": [
-                [c.chain_id, [(s.antecedent, s.relation.value, s.consequent) for s in c.steps]]
+                [
+                    c.chain_id,
+                    [(s.antecedent, s.relation.value, s.consequent) for s in c.steps],
+                ]
                 for c in chains
             ],
             "instances": [asdict(i) for i in instances],

@@ -1,7 +1,7 @@
 # Chapter 6 re-run (RTX 3090, Linux or WSL2). Install into a fresh virtual environment:
 #   python3 -m venv .venv-ch6 && . .venv-ch6/bin/activate
 #   pip install -r experiments/ch6_rerun/requirements.txt
-vllm==0.8.5            # brings a matching torch and transformers
+vllm>=0.11             # tested with vllm 0.21.0 / torch 2.11 (cu130); brings torch and transformers
 sentence-transformers>=3.0
 rdflib>=7.0
 networkx>=3.2
